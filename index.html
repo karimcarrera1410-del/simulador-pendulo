@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador de Física 2D</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            width: 100%;
+            max-width: 800px;
+            background: #1e293b;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            text-align: center;
+            color: #38bdf8;
+        }
+        canvas {
+            background: #090d16;
+            border-radius: 8px;
+            width: 100%;
+            height: 450px;
+            display: block;
+            cursor: grab;
+        }
+        canvas:active {
+            cursor: grabbing;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 15px;
+            background: #0f172a;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-size: 0.85rem;
+            color: #94a3b8;
+            display: flex;
+            justify-content: space-between;
+        }
+        label span {
+            color: #f8fafc;
+            font-weight: 500;
+        }
+        input[type="range"] {
+            width: 100%;
+            accent-color: #38bdf8;
+            cursor: pointer;
+        }
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            font-size: 0.85rem;
+            color: #94a3b8;
+            background: #0f172a;
+            padding: 8px;
+            border-radius: 6px;
+        }
+        .stats span b {
+            color: #38bdf8;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Simulador de Física: Gravedad, Rebotes y Colisión con Paleta</h1>
+        
+        <canvas id="simCanvas"></canvas>
+        
+        <div class="stats">
+            <span>Velocidad: <b id="velText">0.0</b> m/s</span>
+            <span>Energía Total: <b id="energyText">0.0</b> J</span>
+            <span>Modo: <b id="modeText">Libre (Arrastra la paleta)</b></span>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="gravityRange">Gravedad: <span id="gravityVal">9.8</span> m/s²</label>
+                <input type="range" id="gravityRange" min="0" max="25" step="0.5" value="9.8">
+            </div>
+            <div class="control-group">
+                <label for="elasticityRange">Elasticidad (Restitución): <span id="elasticityVal">0.8</span></label>
+                <input type="range" id="elasticityRange" min="0" max="1" step="0.05" value="0.8">
+            </div>
+            <div class="control-group">
+                <label for="frictionRange">Fricción del aire: <span id="frictionVal">0.01</span></label>
+                <input type="range" id="frictionRange" min="0" max="0.05" step="0.005" value="0.01">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Ajustar resolución interna del canvas
+        function resizeCanvas() {
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Parámetros de física
+        let physics = {
+            gravity: 9.8,
+            elasticity: 0.8,
+            friction: 0.01,
+            scale: 25 // píxeles por metro físico aproximado
+        };
+
+        // Objeto Bola
+        let ball = {
+            x: canvas.width / 2,
+            y: 50,
+            vx: 4,
+            vy: 0,
+            radius: 14,
+            mass: 1
+        };
+
+        // Objeto Paleta controlada por el usuario
+        let paddle = {
+            x: canvas.width / 2 - 50,
+            y: canvas.height - 40,
+            width: 100,
+            height: 14,
+            vx: 0,
+            targetX: canvas.width / 2 - 50
+        };
+
+        let isDragging = false;
+
+        // Controles UI
+        const gravityRange = document.getElementById('gravityRange');
+        const gravityVal = document.getElementById('gravityVal');
+        const elasticityRange = document.getElementById('elasticityRange');
+        const elasticityVal = document.getElementById('elasticityVal');
+        const frictionRange = document.getElementById('frictionRange');
+        const frictionVal = document.getElementById('frictionVal');
+        
+        const velText = document.getElementById('velText');
+        const energyText = document.getElementById('energyText');
+
+        gravityRange.addEventListener('input', (e) => {
+            physics.gravity = parseFloat(e.target.value);
+            gravityVal.textContent = physics.gravity.toFixed(1);
+        });
+        elasticityRange.addEventListener('input', (e) => {
+            physics.elasticity = parseFloat(e.target.value);
+            elasticityVal.textContent = physics.elasticity.toFixed(2);
+        });
+        frictionRange.addEventListener('input', (e) => {
+            physics.friction = parseFloat(e.target.value);
+            frictionVal.textContent = physics.friction.toFixed(3);
+        });
+
+        // Eventos de interacción con el ratón/tacto en el canvas
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            // Si el ratón está cerca de la paleta, activamos el arrastre
+            if (mouseX >= paddle.x && mouseX <= paddle.x + paddle.width &&
+                mouseY >= paddle.y - 10 && mouseY <= paddle.y + paddle.height + 10) {
+                isDragging = true;
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            paddle.targetX = mouseX - paddle.width / 2;
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        // Soporte táctil para móviles / tablets
+        canvas.addEventListener('touchstart', (e) => {
+            isDragging = true;
+            updateTouchPos(e);
+        });
+        canvas.addEventListener('touchmove', (e) => {
+            if (isDragging) updateTouchPos(e);
+        });
+        canvas.addEventListener('touchend', () => {
+            isDragging = false;
+        });
+
+        function updateTouchPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const touchX = e.touches[0].clientX - rect.left;
+            paddle.targetX = touchX - paddle.width / 2;
+        }
+
+        // Bucle de animación y física
+        let lastTime = performance.now();
+
+        function update(timestamp) {
+            let dt = (timestamp - lastTime) / 1000;
+            if (dt > 0.1) dt = 0.1; // Evitar saltos grandes si la pestaña pierde foco
+            lastTime = timestamp;
+
+            // Actualizar posición de la paleta con suavizado (inercia)
+            paddle.x += (paddle.targetX - paddle.x) * 0.2;
+            // Limitar paleta dentro del canvas
+            if (paddle.x < 0) paddle.x = 0;
+            if (paddle.x + paddle.width > canvas.width) paddle.x = canvas.width - paddle.width;
+
+            // Calcular velocidad física de la paleta para transferir energía al golpear
+            let paddleVx = (paddle.x - (paddle.prevX || paddle.x)) / dt;
+            paddle.prevX = paddle.x;
+
+            // Aplicar físicas a la bola
+            // Aceleración debida a la gravedad (escalada a píxeles/s²)
+            let accelY = physics.gravity * (physics.scale * 2.5);
+            
+            ball.vy += accelY * dt;
+            // Fricción del aire
+            ball.vx *= (1 - physics.friction);
+            ball.vy *= (1 - physics.friction);
+
+            // Mover bola
+            ball.x += ball.vx;
+            ball.y += ball.vy * dt;
+
+            // Rebotes con las paredes laterales
+            if (ball.x - ball.radius < 0) {
+                ball.x = ball.radius;
+                ball.vx *= -physics.elasticity;
+            } else if (ball.x + ball.radius > canvas.width) {
+                ball.x = canvas.width - ball.radius;
+                ball.vx *= -physics.elasticity;
+            }
+
+            // Rebote con el techo
+            if (ball.y - ball.radius < 0) {
+                ball.y = ball.radius;
+                ball.vy *= -physics.elasticity;
+            }
+
+            // Colisión con la paleta
+            if (
+                ball.x + ball.radius >= paddle.x &&
+                ball.x - ball.radius <= paddle.x + paddle.width &&
+                ball.y + ball.radius >= paddle.y &&
+                ball.y - ball.radius <= paddle.y + paddle.height
+            ) {
+                ball.y = paddle.y - ball.radius; // Corregir posición para evitar traspaso
+                ball.vy *= -physics.elasticity; // Invertir y aplicar restitución
+
+                // Añadir efecto del movimiento de la paleta al golpear (transferencia de momento)
+                ball.vx += paddleVx * 0.15;
+            }
+
+            // Si la bola cae por debajo del canvas, reiniciarla arriba
+            if (ball.y > canvas.height + 50) {
+                ball.x = canvas.width / 2 + (Math.random() * 100 - 50);
+                ball.y = 30;
+                ball.vx = (Math.random() - 0.5) * 6;
+                ball.vy = 0;
+            }
+
+            // Calcular métricas para la UI
+            let currentVel = Math.sqrt(ball.vx * ball.vx + (ball.vy/physics.scale) * (ball.vy/physics.scale));
+            let potentialEnergy = ball.mass * physics.gravity * Math.max(0, (canvas.height - ball.y) / physics.scale);
+            let kineticEnergy = 0.5 * ball.mass * (currentVel * currentVel);
+            
+            velText.textContent = currentVel.toFixed(1);
+            energyText.textContent = (potentialEnergy + kineticEnergy).toFixed(1);
+
+            draw();
+            requestAnimationFrame(update);
+        }
+
+        function draw() {
+            // Limpiar pantalla
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Dibujar cuadrícula de fondo sutil
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            let gridSize = 40;
+            for (let x = 0; x < canvas.width; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+
+            // Dibujar Paleta
+            ctx.fillStyle = '#38bdf8';
+            ctx.shadowColor = '#38bdf8';
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.roundRect(paddle.x, paddle.y, paddle.width, paddle.height, 6);
+            ctx.fill();
+            ctx.shadowBlur = 0; // Reset sombra
+
+            // Dibujar Bola
+            ctx.fillStyle = '#f43f5e';
+            ctx.shadowColor = '#f43f5e';
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        // Iniciar simulación
+        requestAnimationFrame(update);
+    </script>
+</body>
+</html>
